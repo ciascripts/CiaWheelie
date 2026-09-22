@@ -1,7 +1,7 @@
 -- ============================================================
 -- CiaWheelie v1
 -- W/S speed control, angle hold, saved return point,
--- adjustable teleport timer, and floating menu toggle.
+-- adjustable teleport timer, floating menu toggle, and optional Anti-AFK.
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -551,7 +551,7 @@ end
 -- ============================================================
 
 local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(380, 470)
+main.Size = UDim2.fromOffset(380, 554)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.Position = UDim2.fromScale(0.5, 0.5)
 main.BackgroundColor3 = C.base
@@ -576,7 +576,7 @@ local function fitWindow()
     scale.Scale = math.min(
         1,
         math.max(0.1, (view.X - 24) / 380),
-        math.max(0.1, (view.Y - 24) / 470)
+        math.max(0.1, (view.Y - 24) / 554)
     )
 end
 
@@ -882,10 +882,97 @@ startLabel = label(
 
 startLabel.TextXAlignment = Enum.TextXAlignment.Center
 
+-- ============================================================
+-- OPTIONAL ANTI-AFK (independent of the wheelie toggle)
+-- Best effort: executor support and idle-timer behavior vary.
+-- ============================================================
+
+local antiAfkEnabled = false
+local antiAfkConn
+local antiAfkUser
+local antiAfkDisposed = false
+
+local antiAfkCard = panel(main, 20, 434, 340, 72)
+label(antiAfkCard, "ANTI-AFK", 14, 10, 190, 18, 11, C.white, true)
+local antiAfkHint = label(
+    antiAfkCard, "Off", 14, 33, 224, 30, 10, C.muted
+)
+antiAfkHint.TextWrapped = true
+local antiAfkBtn = button(antiAfkCard, "OFF", 254, 18, 72, 34)
+border(antiAfkBtn)
+
+local function drawAntiAfk(message, failed)
+    antiAfkBtn.Text = antiAfkEnabled and "ON" or "OFF"
+    antiAfkBtn.BackgroundColor3 = antiAfkEnabled and C.green or C.base
+    antiAfkBtn.TextColor3 = antiAfkEnabled and C.base or C.muted
+    antiAfkHint.Text = message
+    antiAfkHint.TextColor3 = failed and C.amber or C.muted
+end
+
+local function setAntiAfk(state)
+    if antiAfkConn then
+        antiAfkConn:Disconnect()
+        antiAfkConn = nil
+    end
+    antiAfkEnabled = false
+
+    if not state or antiAfkDisposed then
+        drawAntiAfk("Off")
+        return
+    end
+
+    local ok, err = pcall(function()
+        antiAfkUser = game:GetService("VirtualUser")
+        antiAfkUser:CaptureController()
+    end)
+    if not ok then
+        drawAntiAfk("Input unavailable; see console.", true)
+        warn("[CiaWheelie] Anti-AFK unavailable: " .. tostring(err))
+        return
+    end
+
+    antiAfkEnabled = true
+    drawAntiAfk("On - waiting for idle")
+    antiAfkConn = lp.Idled:Connect(function()
+        if not antiAfkEnabled or antiAfkDisposed then return end
+        if UserInputService:GetFocusedTextBox() then
+            drawAntiAfk("On - paused during text entry")
+            return
+        end
+        local camera = workspace.CurrentCamera
+        if not camera then
+            drawAntiAfk("On - waiting for camera")
+            return
+        end
+
+        local sent, reason = pcall(function()
+            antiAfkUser:CaptureController()
+            antiAfkUser:ClickButton2(Vector2.new(0, 0), camera.CFrame)
+        end)
+        if not antiAfkEnabled or antiAfkDisposed then return end
+        if sent then
+            drawAntiAfk("On - idle input sent")
+        else
+            antiAfkEnabled = false
+            if antiAfkConn then
+                antiAfkConn:Disconnect()
+                antiAfkConn = nil
+            end
+            drawAntiAfk("Input failed; see console.", true)
+            warn("[CiaWheelie] Anti-AFK input failed: " .. tostring(reason))
+        end
+    end)
+end
+
+antiAfkBtn.Activated:Connect(function()
+    setAntiAfk(not antiAfkEnabled)
+end)
+drawAntiAfk("Off - click to enable")
+
 local footer = label(
     main,
     "W  ACCELERATE     /     S  BRAKE     /     ANGLE LOCK",
-    20, 440, 340, 12,
+    20, 524, 340, 12,
     9, C.muted
 )
 
@@ -989,6 +1076,8 @@ table.insert(
 -- ============================================================
 
 gui.Destroying:Connect(function()
+    antiAfkDisposed = true
+    setAntiAfk(false)
     stopMotion()
 
     characterConn:Disconnect()
