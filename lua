@@ -88,6 +88,7 @@ end
 
 local virtualInput
 local heldKey
+local speedKeyNeedsRefresh = false
 
 local function releaseSpeedKey()
     if not heldKey then
@@ -106,7 +107,7 @@ local function releaseSpeedKey()
 end
 
 local function setSpeedKey(key)
-    if key == heldKey then
+    if key == heldKey and not speedKeyNeedsRefresh then
         return
     end
 
@@ -115,6 +116,8 @@ local function setSpeedKey(key)
     if not ok then
         error("Key release failed: " .. tostring(err))
     end
+
+    speedKeyNeedsRefresh = false
 
     if key then
         heldKey = key
@@ -439,9 +442,17 @@ setWheelie = function(state)
     end)
 end
 
+-- Keep the motion loop active while another window has focus.
+-- Re-send the desired speed key on the next control step because
+-- focus changes can clear Roblox's input state.
 local focusConn =
     UserInputService.WindowFocusReleased:Connect(function()
-        stopMotion("Stopped: window lost focus.")
+        speedKeyNeedsRefresh = true
+    end)
+
+local focusGainedConn =
+    UserInputService.WindowFocused:Connect(function()
+        speedKeyNeedsRefresh = true
     end)
 
 local textConn =
@@ -1082,6 +1093,7 @@ gui.Destroying:Connect(function()
 
     characterConn:Disconnect()
     focusConn:Disconnect()
+    focusGainedConn:Disconnect()
     textConn:Disconnect()
 
     if cameraConn then
